@@ -1,5 +1,5 @@
 import { OpenAPIV3 } from 'openapi-types';
-import type { JSONSchema7, JSONSchema7TypeName } from 'json-schema';
+import type { JSONSchema7 } from 'json-schema';
 import { McpToolDefinition } from '../types/index';
 import { shouldIncludeOperation } from './x-mcp.filter';
 
@@ -298,11 +298,14 @@ export function mapOpenApiSchemaToJsonSchema(
     if (resolveRef) {
       const resolved = resolveRef(schema.$ref);
       if (resolved && typeof resolved === 'object') {
-        return mapOpenApiSchemaToJsonSchema(
+        const mapped = mapOpenApiSchemaToJsonSchema(
           resolved as OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject,
           resolveRef,
           seen,
         );
+        return (schema as OpenAPIV3.ReferenceObject & { nullable?: boolean }).nullable
+          ? { anyOf: [mapped, { type: 'null' }] }
+          : mapped;
       }
     }
 
@@ -334,17 +337,6 @@ export function mapOpenApiSchemaToJsonSchema(
     delete (jsonSchema as any).deprecated;
     delete (jsonSchema as any).readOnly;
     delete (jsonSchema as any).writeOnly;
-
-    // Handle nullable properties by adding null to the type
-    if (schema.nullable) {
-      if (Array.isArray(jsonSchema.type)) {
-        if (!jsonSchema.type.includes('null')) jsonSchema.type.push('null');
-      } else if (typeof jsonSchema.type === 'string') {
-        jsonSchema.type = [jsonSchema.type as JSONSchema7TypeName, 'null'];
-      } else if (!jsonSchema.type) {
-        jsonSchema.type = 'null';
-      }
-    }
 
     // Recursively process object properties
     if (jsonSchema.type === 'object' && jsonSchema.properties) {
@@ -415,7 +407,9 @@ export function mapOpenApiSchemaToJsonSchema(
       );
     }
 
-    return jsonSchema;
+    // Apply nullability after mapping so nested refs and enum/composition
+    // constraints are preserved for non-null values.
+    return schema.nullable ? { anyOf: [jsonSchema, { type: 'null' }] } : jsonSchema;
   } finally {
     seen.delete(schema);
   }

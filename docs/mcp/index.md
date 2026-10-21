@@ -49,6 +49,27 @@ paths:
 
 You can change this behavior using [`tools.defaultInclude`](/mcp/options#tools).
 
+### Tool Responses and Output Schemas
+
+Successful tool calls return both text `content` and JSON `structuredContent`.
+Text content keeps the original response payload for compatibility.
+
+When an operation declares an `application/json` success response schema, the first
+matching 2xx response (in status-code order, followed by `2XX`) supplies the tool's
+`outputSchema`. Local references and nullable schemas are supported. Responses
+whose schema does not have `type: object` use an object schema with a required
+`result` property, and their structured content always uses that wrapper. Schemas
+with `type: object` return the response object directly in `structuredContent`.
+Without an output schema, objects are returned directly; arrays, primitives, and
+`null` are wrapped as `{ result: payload }`.
+
+For example, an array response `[ { "id": "7" } ]` is returned as
+`structuredContent: { result: [{ id: "7" }] }`, while its text content remains
+`[{"id":"7"}]`.
+
+Upstream HTTP failures and execution errors return `isError: true` with text
+content rather than structured success data.
+
 ## Next Steps
 
 - [Advanced setup](./advanced-setup.md) — Transport/session strategy and server extension patterns

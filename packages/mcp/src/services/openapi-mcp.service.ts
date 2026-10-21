@@ -153,22 +153,31 @@ export class OpenAPIMcpService implements OnModuleInit, OnModuleDestroy {
   }
 
   private registerTool(server: McpServer, tool: McpToolDefinition) {
+    // MCP structured content must be an object, so wrap other response shapes.
+    const wrapOutput = tool.outputSchema && tool.outputSchema.type !== 'object';
+    const outputSchema = tool.outputSchema
+      ? z.fromJSONSchema(tool.outputSchema as z.core.JSONSchema.JSONSchema)
+      : undefined;
+
     server.registerTool(tool.name, {
       title: tool.name,
       description: tool.description,
       inputSchema: z.fromJSONSchema(tool.inputSchema as z.core.JSONSchema.JSONSchema),
-      outputSchema: tool.outputSchema ? z.fromJSONSchema(tool.outputSchema as z.core.JSONSchema.JSONSchema) : undefined,
+      outputSchema: wrapOutput ? z.object({ result: outputSchema }) : outputSchema,
     }, async (args: any, extra: any) => {
       try {
         const allowlist = this.options.executor?.forwardHeaders ?? ['authorization'];
         const forwarded = this.pickForwardHeaders(extra?.requestInfo?.headers ?? {}, allowlist);
         const result = await this.executor.execute(tool, args, { forwardHeaders: forwarded });
-        const payload = result.json ?? result.text;
+        const payload = result.json !== undefined ? result.json : result.text;
         const text = typeof payload === 'string' ? payload : JSON.stringify(payload);
 
         if (result.ok) {
           this.debugLog(`MCP tool "${tool.name}" completed with status=${result.status}`);
-          return { content: [{ type: 'text' as const, text }] };
+          const structuredContent = wrapOutput || payload === null || typeof payload !== 'object' || Array.isArray(payload)
+            ? { result: payload }
+            : payload;
+          return { content: [{ type: 'text' as const, text }], structuredContent };
         }
 
         this.debugLog(`MCP tool "${tool.name}" returned error status=${result.status}`);
