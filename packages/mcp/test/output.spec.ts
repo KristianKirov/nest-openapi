@@ -17,6 +17,7 @@ const itemSchema: OpenAPIV3.SchemaObject = {
   required: ['id'],
 };
 
+/** Creates an OpenAPI success response with the supplied JSON payload schema. */
 function jsonResponse(schema: ResponseSchema): OpenAPIV3.ResponseObject {
   return { description: 'Success', content: { 'application/json': { schema } } };
 }
@@ -26,6 +27,10 @@ describe('MCP structured output', () => {
   let server: McpServer;
   let execute: jest.MockedFunction<McpExecutor['execute']>;
 
+  /**
+   * Connects an SDK client to a generated server over an in-memory transport.
+   * Returns the advertised tool so tests exercise SDK output validation.
+   */
   async function connect(schema?: ResponseSchema, responses?: OpenAPIV3.ResponsesObject) {
     const spec: OpenAPIV3.Document = {
       openapi: '3.0.0',
@@ -69,6 +74,7 @@ describe('MCP structured output', () => {
     return tools[0];
   }
 
+  /** Configures the mock executor's HTTP status and parsed or raw response body. */
   function respond(json: unknown, text = 'fallback text', ok = true, status = ok ? 200 : 500) {
     execute.mockResolvedValue({
       ok, status, statusText: ok ? 'OK' : 'Internal Server Error',

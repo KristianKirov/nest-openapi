@@ -152,6 +152,14 @@ export class OpenAPIMcpService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Registers an OpenAPI operation with matching MCP input and output contracts.
+   * Successful executions return text and structured content; non-object output
+   * contracts use a result wrapper to keep the structured content object-shaped.
+   *
+   * @param server MCP server that receives the tool registration
+   * @param tool Extracted operation metadata, execution details, and JSON schemas
+   */
   private registerTool(server: McpServer, tool: McpToolDefinition) {
     // MCP structured content must be an object, so wrap other response shapes.
     const wrapOutput = tool.outputSchema && tool.outputSchema.type !== 'object';

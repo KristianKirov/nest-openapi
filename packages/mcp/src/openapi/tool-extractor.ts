@@ -204,6 +204,14 @@ export function generateInputSchemaAndDetails(
   return { inputSchema, parameters: allParameters, requestBodyContentType };
 }
 
+/**
+ * Combines the JSON schemas of all declared 2xx responses into one output contract.
+ *
+ * @param operation Operation whose successful responses define the tool output
+ * @param api Document used to resolve local response and schema references
+ * @returns A single schema or an anyOf union, or undefined when a success response
+ * has no body, no schema, an unresolved response reference, or a non-JSON media type
+ */
 function generateSuccessOutputSchema(
   operation: OpenAPIV3.OperationObject,
   api?: OpenAPIV3.Document,
@@ -285,6 +293,7 @@ function mergeParameters(
  * Maps an OpenAPI schema to a JSON Schema with cycle protection.
  *
  * @param schema OpenAPI schema object or reference
+ * @param resolveRef Optional resolver for referenced OpenAPI schemas
  * @param seen WeakSet tracking already visited schema objects
  * @returns JSON Schema representation
  */
