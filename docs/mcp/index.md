@@ -54,12 +54,16 @@ You can change this behavior using [`tools.defaultInclude`](/mcp/options#tools).
 Successful tool calls return both text `content` and JSON `structuredContent`.
 Text content keeps the original response payload for compatibility.
 
-When an operation declares an `application/json` success response schema, the first
-matching 2xx response (in status-code order, followed by `2XX`) supplies the tool's
-`outputSchema`. Local references and nullable schemas are supported. Responses
-whose schema does not have `type: object` use an object schema with a required
-`result` property, and their structured content always uses that wrapper. Schemas
-with `type: object` return the response object directly in `structuredContent`.
+When every declared success response has an `application/json` schema, the tool's
+`outputSchema` covers all 2xx responses, including `2XX` ranges. Different success
+schemas are combined with `anyOf`; identical mapped schemas share one contract.
+Local references and nullable schemas are supported. Combined schemas and schemas
+without `type: object` use an object schema with a required `result` property,
+and their structured content always uses that wrapper. A single schema with
+`type: object` returns the response object directly in `structuredContent`.
+If any success response has no body, lacks a schema, has an unresolved response
+reference, or advertises a media type other than `application/json`, no output schema is
+registered, so valid success responses are not rejected by an incomplete contract.
 Without an output schema, objects are returned directly; arrays, primitives, and
 `null` are wrapped as `{ result: payload }`.
 

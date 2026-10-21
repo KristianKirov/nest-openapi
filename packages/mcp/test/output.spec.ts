@@ -17,12 +17,16 @@ const itemSchema: OpenAPIV3.SchemaObject = {
   required: ['id'],
 };
 
+function jsonResponse(schema: ResponseSchema): OpenAPIV3.ResponseObject {
+  return { description: 'Success', content: { 'application/json': { schema } } };
+}
+
 describe('MCP structured output', () => {
   let client: Client;
   let server: McpServer;
   let execute: jest.MockedFunction<McpExecutor['execute']>;
 
-  async function connect(schema?: ResponseSchema) {
+  async function connect(schema?: ResponseSchema, responses?: OpenAPIV3.ResponsesObject) {
     const spec: OpenAPIV3.Document = {
       openapi: '3.0.0',
       info: { title: 'Output test', version: '1.0.0' },
@@ -41,7 +45,7 @@ describe('MCP structured output', () => {
         '/output': {
           get: {
             operationId: 'getOutput',
-            responses: { '200': { $ref: '#/components/responses/Success' } },
+            responses: responses ?? { '200': { $ref: '#/components/responses/Success' } },
           },
         },
       },
@@ -65,9 +69,9 @@ describe('MCP structured output', () => {
     return tools[0];
   }
 
-  function respond(json: unknown, text = 'fallback text', ok = true) {
+  function respond(json: unknown, text = 'fallback text', ok = true, status = ok ? 200 : 500) {
     execute.mockResolvedValue({
-      ok, status: ok ? 200 : 500, statusText: ok ? 'OK' : 'Internal Server Error',
+      ok, status, statusText: ok ? 'OK' : 'Internal Server Error',
       json, text, headers: {},
     });
   }
@@ -129,6 +133,93 @@ describe('MCP structured output', () => {
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent).toEqual(structured);
     expect(result.content).toEqual([{ type: 'text', text }]);
+  });
+
+  it.each(['2XX', '2xx'])('accepts every declared success schema including %s', async (range) => {
+    const tool = await connect(itemSchema, {
+      '200': { $ref: '#/components/responses/Success' },
+      '201': jsonResponse({ type: 'array', items: { $ref: '#/components/schemas/Item' } }),
+      [range]: jsonResponse({ type: 'boolean' }),
+      '400': jsonResponse({ type: 'number' }),
+    });
+    expect(tool.outputSchema?.type).toBe('object');
+    expect(tool.outputSchema?.required).toContain('result');
+    expect(tool.outputSchema?.properties?.result).toEqual(expect.objectContaining({ anyOf: expect.any(Array) }));
+
+    for (const [status, payload] of [[200, { id: '7' }], [201, [{ id: '7' }]], [202, false]] as const) {
+      respond(payload, '', true, status);
+      const result = await client.callTool({ name: tool.name, arguments: {} });
+      expect(result.isError).not.toBe(true);
+      expect(result.structuredContent).toEqual({ result: payload });
+      expect(result.content).toEqual([{ type: 'text', text: JSON.stringify(payload) }]);
+    }
+
+    // Error response schemas must not weaken the success contract.
+    respond(7);
+    const invalid = await client.callTool({ name: tool.name, arguments: {} });
+    expect(invalid.isError).toBe(true);
+    expect(invalid.content).toEqual([{ type: 'text', text: expect.stringContaining('Output validation error') }]);
+  });
+
+  it('accepts different object schemas from multiple success statuses', async () => {
+    const tool = await connect(itemSchema, {
+      '200': { $ref: '#/components/responses/Success' },
+      '201': jsonResponse({
+        type: 'object', properties: { name: { type: 'string' } }, required: ['name'],
+      }),
+    });
+    for (const [status, payload] of [[200, { id: '7' }], [201, { name: 'created' }]] as const) {
+      respond(payload, '', true, status);
+      const result = await client.callTool({ name: tool.name, arguments: {} });
+      expect(result.isError).not.toBe(true);
+      expect(result.structuredContent).toEqual({ result: payload });
+    }
+  });
+
+  it('keeps identical success schemas unwrapped', async () => {
+    const tool = await connect(itemSchema, {
+      '200': { $ref: '#/components/responses/Success' },
+      '201': jsonResponse({ $ref: '#/components/schemas/Item' }),
+    });
+    expect(tool.outputSchema?.properties).toHaveProperty('id');
+    expect(tool.outputSchema?.properties).not.toHaveProperty('result');
+    respond({ id: '7' }, '', true, 201);
+    const result = await client.callTool({ name: tool.name, arguments: {} });
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toEqual({ id: '7' });
+  });
+
+  it.each([
+    { name: 'empty body', status: 204, response: { description: 'No content' }, json: undefined, text: '' },
+    { name: 'missing schema', status: 201, response: { description: 'Undocumented JSON', content: { 'application/json': {} } }, json: [1], text: '[1]' },
+    { name: 'plain text', status: 201, response: { description: 'Text', content: { 'text/plain': { schema: { type: 'string' } } } }, json: undefined, text: 'created' },
+    { name: 'unresolved response ref', status: 201, response: { $ref: '#/components/responses/Missing' }, json: [1], text: '[1]' },
+  ])('omits output validation when another success response has $name', async ({ status: alternateStatus, response, json, text }) => {
+    const tool = await connect(itemSchema, {
+      '200': { $ref: '#/components/responses/Success' },
+      [alternateStatus]: response as OpenAPIV3.ResponseObject | OpenAPIV3.ReferenceObject,
+    });
+    expect(tool.outputSchema).toBeUndefined();
+    for (const [status, payload, rawText] of [[200, { id: '7' }, '{"id":"7"}'], [alternateStatus, json, text]] as const) {
+      respond(payload, rawText, true, status);
+      const result = await client.callTool({ name: tool.name, arguments: {} });
+      expect(result.isError).not.toBe(true);
+      expect(result.structuredContent).toEqual(status === 200 ? payload : { result: payload !== undefined ? payload : rawText });
+    }
+  });
+
+  it('omits output validation when a success response also advertises a non-JSON media type', async () => {
+    const tool = await connect(undefined, {
+      '200': {
+        description: 'JSON or text',
+        content: { 'application/json': { schema: itemSchema }, 'text/plain': { schema: { type: 'string' } } },
+      },
+    });
+    expect(tool.outputSchema).toBeUndefined();
+    respond(undefined, 'plain response');
+    const result = await client.callTool({ name: tool.name, arguments: {} });
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toEqual({ result: 'plain response' });
   });
 
   it('still rejects output that violates the response schema', async () => {

@@ -170,7 +170,7 @@ describe('tool extraction', () => {
     );
   });
 
-  it('uses first 2xx application/json response as outputSchema', () => {
+  it('uses a single 2xx application/json response as outputSchema', () => {
     const spec: OpenAPIV3.Document = {
       openapi: '3.0.0',
       info: { title: 'output-test', version: '1' },
@@ -194,9 +194,6 @@ describe('tool extraction', () => {
                     },
                   },
                 },
-              },
-              204: {
-                description: 'no content',
               },
             },
           },

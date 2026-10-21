@@ -220,30 +220,34 @@ function generateSuccessOutputSchema(
     ...statusCodes,
     ...(['2XX', '2xx'] as const).filter((code) => responses[code]),
   ];
+  const schemas = new Map<string, JSONSchema7>();
 
   for (const code of candidateCodes) {
     const rawResponse = responses[code as keyof typeof responses];
-    if (!rawResponse) continue;
+    if (!rawResponse) return undefined;
 
     const response =
       '$ref' in rawResponse
         ? (resolveRef(rawResponse.$ref) as OpenAPIV3.ResponseObject)
         : rawResponse;
-    if (!response?.content) continue;
+    const content = Object.entries(response?.content ?? {});
+    // A single output contract must cover every documented success response,
+    // including empty bodies and alternative media types.
+    if (!content.length) return undefined;
 
-    const jsonContent = response.content['application/json'];
-    const schema = jsonContent?.schema;
-    if (!schema) continue;
+    for (const [contentType, mediaType] of content) {
+      if (contentType !== 'application/json' || !mediaType.schema) return undefined;
 
-    const mapped = mapOpenApiSchemaToJsonSchema(
-      schema as OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject,
-      resolveRef,
-    );
+      const mapped = mapOpenApiSchemaToJsonSchema(mediaType.schema, resolveRef);
+      if (typeof mapped !== 'object') return undefined;
 
-    if (typeof mapped === 'object') return mapped;
+      schemas.set(JSON.stringify(mapped), mapped);
+    }
   }
 
-  return undefined;
+  const successSchemas = [...schemas.values()];
+  if (!successSchemas.length) return undefined;
+  return successSchemas.length === 1 ? successSchemas[0] : { anyOf: successSchemas };
 }
 
 function resolveParameters(
